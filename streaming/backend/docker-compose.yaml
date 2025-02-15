@@ -1,0 +1,21 @@
+services:
+  database:
+    image: postgres:15.1
+    hostname: database
+    container_name: streaming_db
+    restart: always
+    ports:
+      - 54355:5432
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=local
+      - POSTGRES_PORT=5432
+    cap_add:
+      - SYS_NICE # disables logs `mbind: Operation not permitted`
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./scripts:/docker-entrypoint-initdb.d/

@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>E-commerce API Comparison: Streaming vs Traditional</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      .container {
+        display: flex;
+      }
+      .column {
+        flex: 1;
+        padding: 0 15px;
+      }
+      .product-container {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+      }
+      .product-card {
+        border: 1px solid #ddd;
+        padding: 15px;
+        border-radius: 5px;
+      }
+      .stats {
+        background: #f5f5f5;
+        padding: 10px;
+        margin-bottom: 20px;
+        border-radius: 5px;
+      }
+      h2 {
+        border-bottom: 2px solid #eee;
+        padding-bottom: 10px;
+      }
+      button {
+        padding: 10px 15px;
+        background: #4caf50;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-bottom: 20px;
+      }
+      button:hover {
+        background: #45a049;
+      }
+      button:disabled {
+        background: #cccccc;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>E-commerce API Comparison: Streaming vs Traditional</h1>
+
+    <div class="container">
+      <!-- Streaming Method -->
+      <div class="column">
+        <h2>Streaming Approach</h2>
+        <button id="start-streaming">Start Streaming Test</button>
+
+        <div class="stats" id="streaming-stats">
+          Products loaded: <span id="streaming-count">0</span><br />
+          Time elapsed: <span id="streaming-time">0</span> seconds<br />
+          Memory usage: <span id="streaming-memory">calculating...</span>
+        </div>
+
+        <div id="streaming-loading">Click the button to start test...</div>
+        <div id="streaming-container" class="product-container"></div>
+      </div>
+
+      <!-- Traditional Method -->
+      <div class="column">
+        <h2>Traditional Approach</h2>
+        <button id="start-traditional">Start Traditional Test</button>
+
+        <div class="stats" id="traditional-stats">
+          Products loaded: <span id="traditional-count">0</span><br />
+          Time elapsed: <span id="traditional-time">0</span> seconds<br />
+          Memory usage: <span id="traditional-memory">calculating...</span>
+        </div>
+
+        <div id="traditional-loading">Click the button to start test...</div>
+        <div id="traditional-container" class="product-container"></div>
+      </div>
+    </div>
+
+    <script>
+      // Streaming implementation
+      const streamingContainer = document.getElementById("streaming-container");
+      const streamingLoadingElement = document.getElementById("streaming-loading");
+      const streamingCountElement = document.getElementById("streaming-count");
+      const streamingTimeElement = document.getElementById("streaming-time");
+      const streamingMemoryElement = document.getElementById("streaming-memory");
+      const streamingButton = document.getElementById("start-streaming");
+
+      let streamingCount = 0;
+      let streamingStartTime;
+
+      streamingButton.addEventListener("click", async () => {
+        // Reset UI
+        streamingContainer.innerHTML = "";
+        streamingCount = 0;
+        streamingCountElement.textContent = "0";
+        streamingTimeElement.textContent = "0";
+        streamingMemoryElement.textContent = "calculating...";
+        streamingLoadingElement.textContent = "Loading products...";
+        streamingButton.disabled = true;
+
+        // Track memory
+        const initialMemory = performance.memory ? performance.memory.usedJSHeapSize : 0;
+
+        // Start timer
+        streamingStartTime = Date.now();
+
+        try {
+          const response = await fetch("http://localhost:3000/api/products/stream");
+
+          // Get a reader from the response body stream
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+
+          let buffer = "";
+          let receivingFirstBracket = true;
+
+          while (true) {
+            const { value, done } = await reader.read();
+
+            if (done) break;
+
+            // Convert the chunk to text and add to buffer
+            buffer += decoder.decode(value, { stream: true });
+
+            // Skip the opening bracket
+            if (receivingFirstBracket && buffer.includes("[")) {
+              buffer = buffer.slice(buffer.indexOf("[") + 1);
+              receivingFirstBracket = false;
+            }
+
+            // Process complete JSON objects
+            let lastNewlineIndex = 0;
+            let nextNewlineIndex;
+
+            while ((nextNewlineIndex = buffer.indexOf("\n", lastNewlineIndex)) !== -1) {
+              const line = buffer.substring(lastNewlineIndex, nextNewlineIndex).trim();
+              lastNewlineIndex = nextNewlineIndex + 1;
+
+              if (line.length === 0) continue;
+
+              // Remove trailing comma if present
+              const jsonStr = line.endsWith(",") ? line.slice(0, -1) : line;
+
+              try {
+                if (jsonStr !== "]") {
+                  const product = JSON.parse(jsonStr);
+                  renderProduct(product, streamingContainer);
+                  streamingCount++;
+                  streamingCountElement.textContent = streamingCount;
+
+                  // Update time every 10 products
+                  if (streamingCount % 10 === 0) {
+                    const seconds = ((Date.now() - streamingStartTime) / 1000).toFixed(1);
+                    streamingTimeElement.textContent = seconds;
+
+                    // Update memory if available
+                    if (performance.memory) {
+                      const currentMemory = performance.memory.usedJSHeapSize;
+                      const memoryIncrease = (currentMemory - initialMemory) / (1024 * 1024);
+                      streamingMemoryElement.textContent = `~${memoryIncrease.toFixed(1)} MB increase`;
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error("Error parsing JSON:", e, jsonStr);
+              }
+            }
+
+            // Keep the remainder for the next iteration
+            buffer = buffer.substring(lastNewlineIndex);
+          }
+
+          // Final updates
+          const seconds = ((Date.now() - streamingStartTime) / 1000).toFixed(1);
+          streamingTimeElement.textContent = seconds;
+
+          if (performance.memory) {
+            const currentMemory = performance.memory.usedJSHeapSize;
+            const memoryIncrease = (currentMemory - initialMemory) / (1024 * 1024);
+            streamingMemoryElement.textContent = `~${memoryIncrease.toFixed(1)} MB increase`;
+          } else {
+            streamingMemoryElement.textContent = "Not available in your browser";
+          }
+
+          streamingLoadingElement.textContent = "All products loaded!";
+          streamingButton.disabled = false;
+        } catch (error) {
+          console.error("Streaming error:", error);
+          streamingLoadingElement.textContent = "Error loading products. See console for details.";
+          streamingButton.disabled = false;
+        }
+      });
+
+      // Traditional implementation
+      const traditionalContainer = document.getElementById("traditional-container");
+      const traditionalLoadingElement = document.getElementById("traditional-loading");
+      const traditionalCountElement = document.getElementById("traditional-count");
+      const traditionalTimeElement = document.getElementById("traditional-time");
+      const traditionalMemoryElement = document.getElementById("traditional-memory");
+      const traditionalButton = document.getElementById("start-traditional");
+
+      let traditionalCount = 0;
+      let traditionalStartTime;
+
+      traditionalButton.addEventListener("click", async () => {
+        // Reset UI
+        traditionalContainer.innerHTML = "";
+        traditionalCount = 0;
+        traditionalCountElement.textContent = "0";
+        traditionalTimeElement.textContent = "0";
+        traditionalMemoryElement.textContent = "calculating...";
+        traditionalLoadingElement.textContent = "Loading products...";
+        traditionalButton.disabled = true;
+
+        // Track memory
+        const initialMemory = performance.memory ? performance.memory.usedJSHeapSize : 0;
+
+        // Start timer
+        traditionalStartTime = Date.now();
+
+        try {
+          // Load all products using pagination until we get all of them
+          let page = 1;
+          const limit = 1000; // Large page size to reduce number of requests
+          let hasMore = true;
+
+          while (hasMore) {
+            const response = await fetch(`http://localhost:3000/api/products?page=${page}&limit=${limit}`);
+            const data = await response.json();
+
+            // Update counts and times
+            traditionalCount += data.products.length;
+            traditionalCountElement.textContent = traditionalCount;
+
+            const seconds = ((Date.now() - traditionalStartTime) / 1000).toFixed(1);
+            traditionalTimeElement.textContent = seconds;
+
+            // Update memory if available
+            if (performance.memory) {
+              const currentMemory = performance.memory.usedJSHeapSize;
+              const memoryIncrease = (currentMemory - initialMemory) / (1024 * 1024);
+              traditionalMemoryElement.textContent = `~${memoryIncrease.toFixed(1)} MB increase`;
+            }
+
+            // Render all products
+            data.products.forEach((product) => {
+              renderProduct(product, traditionalContainer);
+            });
+
+            // Check if we need to load more
+            if (page >= data.pagination.totalPages) {
+              hasMore = false;
+            } else {
+              page++;
+            }
+          }
+
+          // Final updates
+          const seconds = ((Date.now() - traditionalStartTime) / 1000).toFixed(1);
+          traditionalTimeElement.textContent = seconds;
+
+          if (performance.memory) {
+            const currentMemory = performance.memory.usedJSHeapSize;
+            const memoryIncrease = (currentMemory - initialMemory) / (1024 * 1024);
+            traditionalMemoryElement.textContent = `~${memoryIncrease.toFixed(1)} MB increase`;
+          } else {
+            traditionalMemoryElement.textContent = "Not available in your browser";
+          }
+
+          traditionalLoadingElement.textContent = "All products loaded!";
+          traditionalButton.disabled = false;
+        } catch (error) {
+          console.error("Traditional loading error:", error);
+          traditionalLoadingElement.textContent = "Error loading products. See console for details.";
+          traditionalButton.disabled = false;
+        }
+      });
+
+      // Shared product rendering function
+      function renderProduct(product, container) {
+        const card = document.createElement("div");
+        card.className = "product-card";
+
+        card.innerHTML = `
+        <h3>${product.name}</h3>
+        <p><strong>$${parseFloat(product.price).toFixed(2)}</strong></p>
+        <p>Category: ${product.category}</p>
+      `;
+
+        container.appendChild(card);
+      }
+    </script>
+  </body>
+</html>
